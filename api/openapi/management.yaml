@@ -166,7 +166,6 @@ components:
         - started
         - starting
         - stopping
-        - stopped
         - error
     Application:
       required:
