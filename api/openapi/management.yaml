@@ -157,8 +157,8 @@ components:
     Hash:
       type: string
       format: hash
-      pattern: "^([0-9a-fA-F]{64})$"
-      example: "9a8d6ce861c71b592c236013b5c3fa167501431def4ad86ff59a3b12aa331dfc"
+      pattern: "0x^([0-9a-fA-F]{64})$"
+      example: "0x9a8d6ce861c71b592c236013b5c3fa167501431def4ad86ff59a3b12aa331dfc"
     ApplicationStatus:
       type: string
       description: Application status
@@ -233,7 +233,7 @@ components:
                 type: integer
                 example: 456311
               templateHash:
-                $ref: "#/components/schemas/Address"
+                $ref: "#/components/schemas/Hash"
               snapshotUri:
                 type: string
                 format: uri
