@@ -238,3 +238,7 @@ components:
               snapshotUri:
                 type: string
                 format: uri
+            required:
+              - blockNumber
+              - templateHash
+              - snapshotUri
