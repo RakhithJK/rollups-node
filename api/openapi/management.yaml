@@ -189,6 +189,8 @@ components:
           format: uri
         status:
           $ref: "#/components/schemas/ApplicationStatus"
+        error:
+          type: string
     Error:
       type: object
       properties:
