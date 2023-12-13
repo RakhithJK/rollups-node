@@ -163,6 +163,7 @@ components:
       type: string
       description: Application status
       enum:
+        - downloading
         - started
         - starting
         - stopping
