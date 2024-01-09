@@ -14,8 +14,9 @@ readonly script_dir
 
 ################################################################################
 # Configuration
-ROLLUPS_CONTRACTS_VERSION="1.1.0"
 DEVNET_RPC_URL="http://localhost:8545"
+DEVNET_AUTHORITY_HISTORY_FACTORY_ADDRESS="0x3890A047Cf9Af60731E80B2105362BbDCD70142D"
+DEVNET_DAPP_FACTORY_ADDRESS="0x7122cd1221C20892234186facfE8615e6743Ab02"
 DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 DEVNET_FOUNDRY_ACCOUNT_0_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 # Salt is the same as hardhat's create2Salt
@@ -23,17 +24,18 @@ DEVNET_FOUNDRY_ACCOUNT_0_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478
 DEVNET_DEFAULT_SALT="0x0000000000000000000000000000000000000000000000000000000000000000"
 readonly ROLLUPS_CONTRACTS_VERSION \
     DEVNET_RPC_URL \
+    DEVNET_AUTHORITY_HISTORY_FACTORY_ADDRESS \
+    DEVNET_DAPP_FACTORY_ADDRESS \
     DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS \
     DEVNET_FOUNDRY_ACCOUNT_0_PRIVATE_KEY \
     DEVNET_DEFAULT_SALT
 
 # Defaults
+rollups_contracts_version="${ROLLUPS_CONTRACTS_VERSION}"
 devnet_anvil_state_file=$(realpath "./anvil_state.json")
 devnet_deployment_file=$(realpath "./deployment.json")
 template_hash_file=""
 VERBOSE=""
-forge_remappings_file="$script_dir/remappings.txt"
-readonly forge_remappings_file
 
 # Deployment info, which will be gathered during processing
 declare -A deployment_info
@@ -43,9 +45,10 @@ declare -A deployment_info
 ################################################################################
 usage()
 {
+   echo
    echo "Generate devnet for testing the Cartesi Rollups Node"
    echo
-   echo "Usage: $0 [options]"
+   echo "Usage: ROLLUPS_CONTRACTS_VERSION="VERSION_NUMBER" $0 [options]"
    echo
    echo "OPTIONS:"
    echo
@@ -102,159 +105,15 @@ generate_deployment_file() {
 }
 
 ################################################################################
-# Deploy rollups libraries
-deploy_libraries() {
-    local contract="lib/@cartesi/util/contracts/CartesiMathV2.sol"
-    local name="CartesiMathV2"
-    local lib_address=""
-    contract_deploy \
-        lib_address \
-        "$contract" \
-        "$name"
-    mathv2_lib="$contract:$name:$lib_address"
-    verbose "deployed $mathv2_lib"
-
-    contract="lib/@cartesi/util/contracts/MerkleV2.sol"
-    name="MerkleV2"
-    contract_deploy \
-        lib_address \
-        "$contract" \
-        "$name" \
-        --libraries \
-            "$mathv2_lib"
-    merklev2_lib="$contract:$name:$lib_address"
-    verbose "deployed $merklev2_lib"
-
-    contract="lib/@cartesi/util/contracts/Bitmask.sol"
-    name="Bitmask"
-    contract_deploy \
-        lib_address \
-        "$contract" \
-        "$name"
-    bitmask_lib="$contract:$name:$lib_address"
-    verbose "deployed $bitmask_lib"
-}
-
-################################################################################
-# Deploy portals
-deploy_portals() {
-    local name="InputBox"
-    local contract="src/inputs/InputBox.sol"
-    local portal_address=""
-    contract_deploy \
-        portal_address \
-        "$contract" \
-        "$name"
-    deployment_info["CARTESI_CONTRACTS_INPUT_BOX_ADDRESS"]="$portal_address"
-    verbose "deployed $contract:$name:$portal_address"
-
-    declare -A portals
-    portals["ERC1155BatchPortal"]="src/portals/ERC1155BatchPortal.sol"
-    portals["ERC1155SinglePortal"]="src/portals/ERC1155SinglePortal.sol"
-    portals["ERC20Portal"]="src/portals/ERC20Portal.sol"
-    portals["ERC721Portal"]="src/portals/ERC721Portal.sol"
-    portals["EtherPortal"]="src/portals/EtherPortal.sol"
-
-    local inputbox_address="$portal_address"
-    for key in "${!portals[@]}"; do
-        name="${key}"
-        contract="${portals[${key}]}"
-        contract_deploy \
-            portal_address \
-            "$contract" \
-            "$name" \
-            --constructor-args \
-                "$inputbox_address"
-        verbose "deployed $contract:$name:$portal_address"
-    done
-}
-
-################################################################################
-# Deploy DAppRelay
-deploy_relay() {
-    local contract="src/relays/DAppAddressRelay.sol"
-    local name="DAppAddressRelay"
-    local relay_address=""
-    contract_deploy \
-        relay_address \
-        "$contract" \
-        "$name" \
-        --constructor-args \
-            "$DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS"
-    verbose "deployed $contract:$name:$relay_address"
-}
-
-################################################################################
-# Create DApp factories
-create_factories() {
-    local -n auth_hist_factory_addr="$1"
-    shift
-    local -n dapp_factory_addr="$1"
-    shift
-
-    local contract="src/dapp/CartesiDAppFactory.sol"
-    local name="CartesiDAppFactory"
-    local factory_address=""
-    contract_deploy \
-        factory_address \
-        "$contract" \
-        "$name" \
-            --libraries "$mathv2_lib" \
-            --libraries "$merklev2_lib" \
-            --libraries "$bitmask_lib"
-    dapp_factory_addr="$factory_address"
-    verbose "deployed $contract:$name:$factory_address"
-
-    contract="src/consensus/authority/AuthorityFactory.sol"
-    name="AuthorityFactory"
-    contract_deploy \
-        factory_address \
-        "$contract" \
-        "$name" \
-        --constructor-args \
-            "$DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS"
-    verbose "deployed $contract:$name:$factory_address"
-    authority_factory_address="$factory_address"
-
-    contract="src/history/HistoryFactory.sol"
-    name="HistoryFactory"
-    contract_deploy \
-        factory_address \
-        "$contract" \
-        "$name" \
-        --constructor-args \
-            "$DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS"
-    verbose "deployed $contract:$name:$factory_address"
-    history_factory_address="$factory_address"
-
-    contract="src/consensus/authority/AuthorityHistoryPairFactory.sol"
-    name="AuthorityHistoryPairFactory"
-    contract_deploy \
-        factory_address \
-        "$contract" \
-        "$name" \
-        --constructor-args \
-            "$authority_factory_address" \
-            "$history_factory_address"
-    auth_hist_factory_addr="$factory_address"
-    verbose "deployed $contract:$name:$factory_address"
-}
-
-################################################################################
 # create DApp contracts
 create_dapp() {
     local -n ret="$1"
-    shift
-    local auth_hist_factory_addr="$1"
-    shift
-    local dapp_factory_addr="$1"
-    shift
-
     local addresses
+
     contract_create \
         addresses \
         block_number \
-        "$auth_hist_factory_addr" \
+        "$DEVNET_AUTHORITY_HISTORY_FACTORY_ADDRESS" \
         "newAuthorityHistoryPair(address,bytes32)(address,address)" \
             "$DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS" \
             "$DEVNET_DEFAULT_SALT"
@@ -268,7 +127,7 @@ create_dapp() {
     contract_create \
         addresses \
         block_number \
-        "$dapp_factory_addr" \
+        "$DEVNET_DAPP_FACTORY_ADDRESS" \
         "newApplication(address,address,bytes32,bytes32)(address)" \
             "$authority_address" \
             "$DEVNET_FOUNDRY_ACCOUNT_0_ADDRESS" \
@@ -309,6 +168,11 @@ while getopts ":a:d:t:hv" option; do
     esac
 done
 
+if [[ -z "$rollups_contracts_version" ]]; then
+    err "missing ROLLUPS_CONTRACTS_VERSION definition"
+    usage
+fi
+
 if [[ -z "$template_hash_file" ]]; then
     err "missing template-hash-file"
     usage
@@ -335,26 +199,14 @@ anvil_up \
 check_error $? "failed to start anvil"
 log "started anvil (pid=$anvil_pid)"
 
-forge_prepare \
+deploy_rollups \
     "$work_dir" \
-    "$forge_remappings_file"
-log "prepared forge environment"
-
-deploy_libraries
-
-deploy_portals
-deploy_relay
-log "deployed contracts"
-
-create_factories \
-    auth_hist_factory_address \
-    dapp_factory_address
-log "created factories"
+    "$rollups_contracts_version"
+check_error $? "failed to deploy rollups-contracts"
+log "rollups-contracts successfully deployed"
 
 create_dapp \
-    dapp_address \
-    "$auth_hist_factory_address" \
-    "$dapp_factory_address"
+    dapp_address
 log "created CartesiDApp"
 
 generate_deployment_file \

@@ -28,6 +28,7 @@ target "common" {
     LINUX_VERSION             = "0.17.0"
     LINUX_KERNEL_VERSION      = "5.15.63-ctsi-2-v0.17.0"
     ROM_VERSION               = "0.17.0"
+    ANVIL_IP_ADDR             = "0.0.0.0"
   }
 }
 

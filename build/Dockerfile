@@ -18,6 +18,7 @@ ARG ROOTFS_VERSION
 ARG LINUX_VERSION
 ARG LINUX_KERNEL_VERSION
 ARG ROM_VERSION
+ARG ANVIL_IP_ADDR
 
 # Build directories.
 ARG SNAPSHOT_BUILD_PATH=/build/snapshot
@@ -123,25 +124,22 @@ CMD /bin/bash
 FROM ${BASE_IMAGE} as devnet-base
 
 # Install system dependencies.
-ARG DEBIAN_FRONTEND=noninteractive
 RUN <<EOF
 apt-get update
-apt-get install -y --no-install-recommends \
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    git \
-    jq \
-    wget \
-    xxd
+    git
 EOF
 
-# Install Foundry.
+# Install Foundry
 RUN curl -L https://foundry.paradigm.xyz | bash
 ENV PATH="~/.foundry/bin:${PATH}"
 ARG FOUNDRY_COMMIT_VERSION
 RUN <<EOF
 bash -c foundryup -C ${FOUNDRY_COMMIT_VERSION}
 ln -s ~/.foundry/bin/anvil /usr/bin/anvil
+ln -s ~/.foundry/bin/cast /usr/bin/cast
 EOF
 
 # STAGE: devnet-builder
@@ -151,13 +149,77 @@ FROM devnet-base as devnet-builder
 ARG DEVNET_BUILD_PATH
 WORKDIR ${DEVNET_BUILD_PATH}
 
+# Install dependencies needed to install yarn
+RUN <<EOF
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gnupg
+EOF
+
+# Install yarn
+RUN <<EOF
+curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
+echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    nodejs \
+    yarn
+EOF
+
+# Install Go
+ARG GO_VERSION
+ADD https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz go.linux-amd64.tar.gz
+RUN <<EOF
+rm -rf /usr/local/go && \
+    tar -C /usr/local -xzf go.linux-amd64.tar.gz
+rm -rf go.linux-amd64.tar.gz
+EOF
+ENV PATH="$PATH:/usr/local/go/bin"
+
+# Copy scripts
+COPY scripts/devnet/anvil_up.sh .
+COPY cmd/gen-devnet .
+
+# Download rollups-contracts
+ARG ROLLUPS_CONTRACTS_VERSION
+ADD "https://github.com/cartesi/rollups-contracts/archive/refs/tags/v$ROLLUPS_CONTRACTS_VERSION.tar.gz" rollups-contracts.tar.gz
+ENV ROLLUPS_CONTRACTS_VERSION="${ROLLUPS_CONTRACTS_VERSION}"
+RUN <<EOF
+tar zxf \
+    rollups-contracts.tar.gz \
+    > /dev/null
+rm rollups-contracts.tar.gz
+mv rollups-contracts-$ROLLUPS_CONTRACTS_VERSION rollups-contracts
+EOF
+
+# Prepare environment
+ARG ANVIL_IP_ADDR
+ENV ANVIL_IP_ADDR="${ANVIL_IP_ADDR}"
+ENV RPC_URL="http://${ANVIL_IP_ADDR}:8545"
+ARG ANVIL_STATE_FILE="anvil_state.json"
+ENV ANVIL_STATE_FILE="${ANVIL_STATE_FILE}"
+
 # Copy machine snapshot hash.
 ARG SNAPSHOT_BUILD_PATH
 COPY --from=snapshot-builder ${SNAPSHOT_BUILD_PATH}/hash hash.bin
 
-# Generate Anvil state.
-COPY scripts scripts
-RUN ./scripts/devnet/gen-devnet.sh -v -t hash.bin
+# Generate anvil state on a single step:
+# - start anvil on background
+# - deploy rollups-contracts
+# - generate Application base on hash file
+RUN <<EOF
+./anvil_up.sh
+
+cd rollups-contracts/onchain/rollups
+yarn install
+yarn deploy:development
+cd -
+
+go mod init gen-devnet
+go mod tidy
+go run . --template-hash-file hash.bin
+EOF
+
 
 # STAGE: rollups-node-devnet
 #
@@ -174,7 +236,8 @@ COPY scripts/devnet/lib/anvil_net_listening.sh /usr/bin/anvil_net_listening.sh
 HEALTHCHECK --interval=1s --timeout=1s --retries=5 CMD anvil_net_listening.sh
 
 # Make Anvil bind to the external network interface.
-ENV ANVIL_IP_ADDR="0.0.0.0"
+ARG ANVIL_IP_ADDR
+ENV ANVIL_IP_ADDR="${ANVIL_IP_ADDR}"
 
 # Start Anvil.
 CMD anvil --block-time 1 --load-state $ANVIL_STATE_PATH
